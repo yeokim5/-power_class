@@ -408,29 +408,119 @@ class RemminaRDPApp:
             return
             
         try:
-            # Request sudo privileges if not running as root
-            if os.geteuid() != 0:
-                self.show_message("키보드 차단을 위해 관리자 권한이 필요합니다", "#666666")
-                
-                # Create a script to disable Wayland's keyboard shortcuts
-                temp_script = "/tmp/disable_wayland_shortcuts.sh"
-                with open(temp_script, "w") as f:
-                    f.write("""#!/bin/bash
-# Disable Wayland keyboard shortcuts temporarily
-gsettings set org.gnome.mutter.wayland xwayland-grab-access-rules "['Remmina', 'remmina']"
+            # Create a comprehensive script to disable all system keyboard shortcuts
+            temp_script = "/tmp/disable_all_shortcuts.sh"
+            with open(temp_script, "w") as f:
+                f.write("""#!/bin/bash
+# Completely disable all system keyboard shortcuts
+
+# 1. Disable all GNOME keyboard shortcuts
+gsettings set org.gnome.desktop.wm.keybindings panel-main-menu "[]"
+gsettings set org.gnome.desktop.wm.keybindings close "[]"
+gsettings set org.gnome.desktop.wm.keybindings maximize "[]"
+gsettings set org.gnome.desktop.wm.keybindings minimize "[]"
+gsettings set org.gnome.desktop.wm.keybindings toggle-maximized "[]"
+gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"
+gsettings set org.gnome.desktop.wm.keybindings begin-move "[]"
+gsettings set org.gnome.desktop.wm.keybindings begin-resize "[]"
+gsettings set org.gnome.desktop.wm.keybindings toggle-on-all-workspaces "[]"
 gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]"
 gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward "[]"
-gsettings set org.gnome.desktop.wm.keybindings panel-main-menu "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-windows "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-windows-backward "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-1 "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-2 "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-3 "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-4 "[]"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "[]"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-down "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-1 "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-2 "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-3 "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-4 "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-left "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-right "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-up "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-down "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-corner-nw "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-corner-ne "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-corner-sw "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-corner-se "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-side-n "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-side-s "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-side-e "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-side-w "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-center "[]"
+
+# 2. Disable media keys
+gsettings set org.gnome.settings-daemon.plugins.media-keys volume-down "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys volume-up "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys volume-mute "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys play "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys pause "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys stop "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys next "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys previous "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys logout "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys eject "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys media "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys calculator "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys email "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys www "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys home "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys search "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys screensaver "[]"
+
+# 3. Disable shell keybindings
+gsettings set org.gnome.shell.keybindings toggle-overview "[]"
+gsettings set org.gnome.shell.keybindings toggle-application-view "[]"
+gsettings set org.gnome.shell.keybindings toggle-message-tray "[]"
+gsettings set org.gnome.shell.keybindings focus-active-notification "[]"
+gsettings set org.gnome.shell.keybindings toggle-quick-settings "[]"
+
+# 4. Set Wayland to allow Remmina to grab keyboard
+gsettings set org.gnome.mutter.wayland xwayland-grab-access-rules "['Remmina', 'remmina']"
+
+# 5. Create an Xmodmap file to disable Super key
+echo "keycode 133 = NoSymbol" > /tmp/disable_super.xmodmap
+echo "keycode 134 = NoSymbol" >> /tmp/disable_super.xmodmap
+
+# 6. Apply the Xmodmap if we're in X11
+if [ "$XDG_SESSION_TYPE" = "x11" ]; then
+    xmodmap /tmp/disable_super.xmodmap
+fi
+
+# 7. Use xinput to disable problematic keys directly
+# Find all keyboard devices
+for device in $(xinput list | grep -i keyboard | grep -v pointer | sed -n 's/.*id=\\([0-9]*\\).*/\\1/p'); do
+    # Create a temporary mapping file that disables Super keys
+    echo "keycode 133 = NoSymbol" > /tmp/disable_keys.xkb
+    echo "keycode 134 = NoSymbol" >> /tmp/disable_keys.xkb
+    
+    # Apply the mapping to the device
+    setxkbmap -device $device -print | xkbcomp -i $device - /tmp/xkb.dump
+    xkbcomp -i $device /tmp/disable_keys.xkb $DISPLAY
+done
+
+# 8. For Wayland, use dconf directly as it's more reliable
+dconf write /org/gnome/desktop/wm/keybindings/switch-applications "[]"
+dconf write /org/gnome/desktop/wm/keybindings/switch-applications-backward "[]"
+dconf write /org/gnome/mutter/wayland/xwayland-grab-access-rules "['Remmina', 'remmina']"
+
+# 9. Disable GNOME Shell overlay key (Super key)
+gsettings set org.gnome.mutter overlay-key ""
 """)
-                os.chmod(temp_script, 0o755)
-                
-                # Run the script to disable shortcuts
-                subprocess.run(["pkexec", temp_script], capture_output=True)
-                
+            os.chmod(temp_script, 0o755)
+            
+            # Run the script to disable all shortcuts
+            subprocess.run(["pkexec", temp_script], capture_output=True)
+            
+            # Now proceed with keyboard grabbing
+            if os.geteuid() != 0:
                 # Restart the script with sudo for keyboard grabbing
-                result = subprocess.run(["pkexec", sys.executable] + sys.argv, 
+                result = subprocess.run(["pkexec", sys.executable] + sys.argv + ["--with-keyboard-blocking"], 
                                       capture_output=True, text=True)
                 if result.returncode != 0:
                     self.show_error("관리자 권한을 얻지 못했습니다. 키보드 차단이 작동하지 않을 수 있습니다.")
@@ -447,10 +537,137 @@ gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]"
                 daemon=True
             )
             self.keyboard_blocker_thread.start()
+            
+            # Also launch a separate process to monitor and intercept Super key presses
+            self.launch_super_key_blocker()
+            
             self.show_message("키보드가 원격 세션으로 전달됩니다", self.success_color)
         except Exception as e:
             self.show_error(f"키보드 차단 실패: {str(e)}")
             self.keyboard_blocked = False
+
+    def launch_super_key_blocker(self):
+        """Launch a separate process to specifically block Super key"""
+        blocker_script = "/tmp/super_key_blocker.py"
+        with open(blocker_script, "w") as f:
+            f.write("""#!/usr/bin/env python3
+import evdev
+from evdev import ecodes, InputDevice, UInput
+import select
+import sys
+import time
+
+# Find all keyboard devices
+keyboards = []
+for path in evdev.list_devices():
+    try:
+        device = evdev.InputDevice(path)
+        capabilities = device.capabilities()
+        if ecodes.EV_KEY in capabilities:
+            if any(key in capabilities[ecodes.EV_KEY] for key in 
+                  [ecodes.KEY_A, ecodes.KEY_SPACE, ecodes.KEY_1]):
+                keyboards.append(device)
+    except:
+        pass
+
+if not keyboards:
+    print("No keyboard devices found")
+    sys.exit(1)
+
+# Try to grab all keyboard devices
+grabbed_devices = []
+for device in keyboards:
+    try:
+        device.grab()
+        grabbed_devices.append(device)
+    except:
+        print(f"Failed to grab {device.name}")
+
+if not grabbed_devices:
+    print("Could not grab any keyboard devices")
+    sys.exit(1)
+
+# Create a virtual keyboard to forward events
+ui_capabilities = {
+    ecodes.EV_KEY: grabbed_devices[0].capabilities().get(ecodes.EV_KEY, []),
+    ecodes.EV_SYN: [],
+}
+
+try:
+    with UInput(ui_capabilities, name="remmina-virtual-keyboard") as ui:
+        # Track special key states
+        special_keys = {
+            ecodes.KEY_LEFTALT: False,
+            ecodes.KEY_RIGHTALT: False,
+            ecodes.KEY_TAB: False,
+            ecodes.KEY_LEFTMETA: False,
+            ecodes.KEY_RIGHTMETA: False
+        }
+        
+        print("Super key blocker running...")
+        
+        # Main event loop
+        while True:
+            devices_to_read = []
+            for device in grabbed_devices:
+                try:
+                    devices_to_read.append(device.fd)
+                except:
+                    continue
+                    
+            if not devices_to_read:
+                break
+                
+            r, w, x = select.select(devices_to_read, [], [], 0.1)
+            
+            for fd in r:
+                for device in grabbed_devices:
+                    if device.fd == fd:
+                        try:
+                            for event in device.read():
+                                if event.type == ecodes.EV_KEY:
+                                    # Track special key states
+                                    if event.code in special_keys:
+                                        special_keys[event.code] = (event.value == 1 or event.value == 2)
+                                    
+                                    # Always forward the event
+                                    ui.write(event.type, event.code, event.value)
+                                    ui.syn()
+                                    
+                                    # Special handling for Alt+Tab
+                                    alt_pressed = special_keys[ecodes.KEY_LEFTALT] or special_keys[ecodes.KEY_RIGHTALT]
+                                    if alt_pressed and event.code == ecodes.KEY_TAB:
+                                        time.sleep(0.01)
+                                        if special_keys[ecodes.KEY_LEFTALT]:
+                                            ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTALT, event.value)
+                                        if special_keys[ecodes.KEY_RIGHTALT]:
+                                            ui.write(ecodes.EV_KEY, ecodes.KEY_RIGHTALT, event.value)
+                                        ui.write(ecodes.EV_KEY, ecodes.KEY_TAB, event.value)
+                                        ui.syn()
+                                    
+                                    # Special handling for Super key
+                                    if event.code in [ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA]:
+                                        time.sleep(0.01)
+                                        ui.write(ecodes.EV_KEY, event.code, event.value)
+                                        ui.syn()
+                        except:
+                            continue
+except KeyboardInterrupt:
+    pass
+finally:
+    # Release all grabbed devices
+    for device in grabbed_devices:
+        try:
+            device.ungrab()
+        except:
+            pass
+""")
+        os.chmod(blocker_script, 0o755)
+        
+        # Launch the blocker script with sudo
+        subprocess.Popen(["pkexec", "python3", blocker_script], 
+                       stdout=subprocess.PIPE, 
+                       stderr=subprocess.PIPE)
 
     def stop_keyboard_blocking(self):
         """Stop blocking keyboard input"""
@@ -459,20 +676,32 @@ gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]"
             # Thread will exit on its own when keyboard_blocked becomes False
             self.keyboard_blocker_thread = None
             
-            # Restore Wayland keyboard shortcuts
-            temp_script = "/tmp/restore_wayland_shortcuts.sh"
-            with open(temp_script, "w") as f:
+            # Kill the super key blocker process
+            subprocess.run(["pkill", "-f", "super_key_blocker.py"], capture_output=True)
+            
+            # Restore all keyboard shortcuts
+            restore_script = "/tmp/restore_all_shortcuts.sh"
+            with open(restore_script, "w") as f:
                 f.write("""#!/bin/bash
-# Restore Wayland keyboard shortcuts
+# Reset all GNOME keyboard shortcuts
+gsettings reset-recursively org.gnome.desktop.wm.keybindings
+gsettings reset-recursively org.gnome.settings-daemon.plugins.media-keys
+gsettings reset-recursively org.gnome.shell.keybindings
 gsettings reset org.gnome.mutter.wayland xwayland-grab-access-rules
-gsettings reset org.gnome.desktop.wm.keybindings switch-applications
-gsettings reset org.gnome.desktop.wm.keybindings switch-applications-backward
-gsettings reset org.gnome.desktop.wm.keybindings panel-main-menu
-gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-left
-gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-right
+gsettings reset org.gnome.mutter overlay-key
+
+# Reset xmodmap if in X11
+if [ "$XDG_SESSION_TYPE" = "x11" ]; then
+    setxkbmap -layout us  # Reset to default keyboard layout
+fi
+
+# Reset xinput settings
+for device in $(xinput list | grep -i keyboard | grep -v pointer | sed -n 's/.*id=\\([0-9]*\\).*/\\1/p'); do
+    setxkbmap -device $device -layout us
+done
 """)
-            os.chmod(temp_script, 0o755)
-            subprocess.run(["pkexec", temp_script], capture_output=True)
+            os.chmod(restore_script, 0o755)
+            subprocess.run(["pkexec", restore_script], capture_output=True)
             
             self.show_message("로컬 키보드 입력이 복원되었습니다", self.success_color)
 
