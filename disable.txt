@@ -1,0 +1,12 @@
+gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-windows "[]"
+gsettings set org.gnome.desktop.wm.keybindings close "[]"
+gsettings set org.gnome.desktop.wm.keybindings minimize "[]"
+gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "[]"
+gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"
+gsettings set org.gnome.desktop.wm.keybindings panel-run-dialog "[]"
+gsettings set org.gnome.desktop.wm.keybindings show-desktop "[]"
+gsettings set org.gnome.mutter overlay-key ""
+
+
+dconf reset -f /org/gnome/
