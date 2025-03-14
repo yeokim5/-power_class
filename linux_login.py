@@ -411,7 +411,25 @@ class RemminaRDPApp:
             # Request sudo privileges if not running as root
             if os.geteuid() != 0:
                 self.show_message("키보드 차단을 위해 관리자 권한이 필요합니다", "#666666")
-                # Restart the script with sudo
+                
+                # Create a script to disable Wayland's keyboard shortcuts
+                temp_script = "/tmp/disable_wayland_shortcuts.sh"
+                with open(temp_script, "w") as f:
+                    f.write("""#!/bin/bash
+# Disable Wayland keyboard shortcuts temporarily
+gsettings set org.gnome.mutter.wayland xwayland-grab-access-rules "['Remmina', 'remmina']"
+gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward "[]"
+gsettings set org.gnome.desktop.wm.keybindings panel-main-menu "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]"
+""")
+                os.chmod(temp_script, 0o755)
+                
+                # Run the script to disable shortcuts
+                subprocess.run(["pkexec", temp_script], capture_output=True)
+                
+                # Restart the script with sudo for keyboard grabbing
                 result = subprocess.run(["pkexec", sys.executable] + sys.argv, 
                                       capture_output=True, text=True)
                 if result.returncode != 0:
@@ -440,6 +458,22 @@ class RemminaRDPApp:
         if self.keyboard_blocker_thread:
             # Thread will exit on its own when keyboard_blocked becomes False
             self.keyboard_blocker_thread = None
+            
+            # Restore Wayland keyboard shortcuts
+            temp_script = "/tmp/restore_wayland_shortcuts.sh"
+            with open(temp_script, "w") as f:
+                f.write("""#!/bin/bash
+# Restore Wayland keyboard shortcuts
+gsettings reset org.gnome.mutter.wayland xwayland-grab-access-rules
+gsettings reset org.gnome.desktop.wm.keybindings switch-applications
+gsettings reset org.gnome.desktop.wm.keybindings switch-applications-backward
+gsettings reset org.gnome.desktop.wm.keybindings panel-main-menu
+gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-left
+gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-right
+""")
+            os.chmod(temp_script, 0o755)
+            subprocess.run(["pkexec", temp_script], capture_output=True)
+            
             self.show_message("로컬 키보드 입력이 복원되었습니다", self.success_color)
 
     def block_keyboard(self):
@@ -467,6 +501,15 @@ class RemminaRDPApp:
                 ecodes.EV_SYN: [],
             }
             
+            # Set up a mapping for special keys that need special handling
+            special_keys = {
+                ecodes.KEY_LEFTALT: False,  # Track Alt key state
+                ecodes.KEY_RIGHTALT: False, # Track Alt key state
+                ecodes.KEY_TAB: False,      # Track Tab key state
+                ecodes.KEY_LEFTMETA: False, # Track Windows/Super key state
+                ecodes.KEY_RIGHTMETA: False # Track Windows/Super key state
+            }
+            
             with UInput(ui_capabilities, name="remmina-virtual-keyboard") as ui:
                 # Main event loop - intercept and forward events
                 while self.keyboard_blocked:
@@ -477,10 +520,36 @@ class RemminaRDPApp:
                             if r:
                                 for event in device.read():
                                     if event.type == ecodes.EV_KEY:
-                                        # Forward the event to our virtual keyboard
+                                        # Track state of special keys
+                                        if event.code in special_keys:
+                                            special_keys[event.code] = (event.value == 1 or event.value == 2)
+                                            
+                                        # Handle Alt+Tab specifically
+                                        alt_pressed = special_keys[ecodes.KEY_LEFTALT] or special_keys[ecodes.KEY_RIGHTALT]
+                                        
+                                        # Always forward the event to our virtual keyboard
                                         ui.write(event.type, event.code, event.value)
                                         ui.syn()
-                        except Exception:
+                                        
+                                        # For Alt+Tab, send an additional event to ensure it's captured
+                                        if alt_pressed and event.code == ecodes.KEY_TAB:
+                                            # Send a small delay to help the remote system distinguish the key combo
+                                            time.sleep(0.01)
+                                            # Resend the Alt key to ensure it's recognized in combination
+                                            if special_keys[ecodes.KEY_LEFTALT]:
+                                                ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTALT, event.value)
+                                            if special_keys[ecodes.KEY_RIGHTALT]:
+                                                ui.write(ecodes.EV_KEY, ecodes.KEY_RIGHTALT, event.value)
+                                            ui.write(ecodes.EV_KEY, ecodes.KEY_TAB, event.value)
+                                            ui.syn()
+                                        
+                                        # For Windows/Super key, ensure it's properly forwarded
+                                        if event.code in [ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA]:
+                                            # Send an additional event to ensure it's captured
+                                            time.sleep(0.01)
+                                            ui.write(ecodes.EV_KEY, event.code, event.value)
+                                            ui.syn()
+                        except Exception as e:
                             # Device might have been disconnected
                             continue
         
