@@ -199,8 +199,26 @@ class RemminaRDPApp:
         env = os.environ.copy()
         env["REMMINA_DISABLE_SHORTCUTS"] = "1"  # Custom env var that some Remmina builds recognize
         
-        result = subprocess.run(["remmina", "-c", connection_file], 
-                              env=env, capture_output=True, text=True)
+        # Create a wrapper script to launch Remmina with the right parameters
+        wrapper_script = "/tmp/launch_remmina.sh"
+        with open(wrapper_script, "w") as f:
+            f.write(f"""#!/bin/bash
+# Launch Remmina with keyboard grabbing enabled
+export REMMINA_DISABLE_SHORTCUTS=1
+export REMMINA_KEYBOARD_GRAB=1
+
+# For Wayland, set some environment variables that might help
+if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+    export GDK_BACKEND=x11
+fi
+
+# Launch Remmina
+remmina -c "{connection_file}"
+""")
+        os.chmod(wrapper_script, 0o755)
+        
+        # Run the wrapper script
+        result = subprocess.run([wrapper_script], env=env, capture_output=True, text=True)
         
         # Stop keyboard blocking after Remmina closes
         self.stop_keyboard_blocking()
@@ -208,6 +226,7 @@ class RemminaRDPApp:
         end_time = time.time()
 
         os.remove(connection_file)
+        os.remove(wrapper_script)
 
         if result.returncode != 0:
             self.root.after(0, self.show_error, f"연결 실패: {result.stderr}")
@@ -396,282 +415,179 @@ class RemminaRDPApp:
         subprocess.run(["systemctl", "poweroff"])
 
     def find_keyboard_devices(self):
-        """Find all keyboard input devices"""
+        """Find all keyboard input devices using multiple methods to ensure success"""
         keyboards = []
+        
         try:
-            devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
-            for device in devices:
-                capabilities = device.capabilities()
-                # Check if device has keys (is a keyboard)
-                if ecodes.EV_KEY in capabilities:
-                    # Check if it has typical keyboard keys
-                    if any(key in capabilities[ecodes.EV_KEY] for key in 
-                          [ecodes.KEY_A, ecodes.KEY_SPACE, ecodes.KEY_1]):
-                        keyboards.append(device)
+            # Method 1: Use evdev
+            try:
+                devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
+                for device in devices:
+                    capabilities = device.capabilities()
+                    # Check if device has keys (is a keyboard)
+                    if ecodes.EV_KEY in capabilities:
+                        # Check if it has typical keyboard keys
+                        if any(key in capabilities[ecodes.EV_KEY] for key in 
+                              [ecodes.KEY_A, ecodes.KEY_SPACE, ecodes.KEY_1]):
+                            keyboards.append(device)
+            except Exception as e:
+                self.show_message(f"evdev 검색 실패, 대체 방법 시도 중...", "#666666")
+            
+            # Method 2: Use /proc/bus/input/devices if evdev failed
+            if not keyboards:
+                try:
+                    result = subprocess.run(
+                        ["grep", "-l", "Handlers\\|EV=", "/proc/bus/input/devices"], 
+                        capture_output=True, text=True
+                    )
+                    if result.returncode == 0:
+                        device_info = result.stdout
+                        
+                        # Find lines with keyboard indicators
+                        keyboard_lines = subprocess.run(
+                            ["grep", "-l", "EV=.*120013", "/proc/bus/input/devices"],
+                            capture_output=True, text=True
+                        ).stdout
+                        
+                        # Extract event device numbers
+                        event_devices = subprocess.run(
+                            ["grep", "-o", "event[0-9]\\+", keyboard_lines],
+                            capture_output=True, text=True
+                        ).stdout.strip().split('\n')
+                        
+                        # Create InputDevice objects for each keyboard
+                        for event in event_devices:
+                            if event:
+                                try:
+                                    device = evdev.InputDevice(f"/dev/input/{event}")
+                                    keyboards.append(device)
+                                except:
+                                    pass
+                except Exception as e:
+                    self.show_message(f"/proc 검색 실패, 다른 방법 시도 중...", "#666666")
+            
+            # Method 3: Use xinput as a last resort
+            if not keyboards:
+                try:
+                    result = subprocess.run(
+                        ["xinput", "list", "--name-only"], 
+                        capture_output=True, text=True
+                    )
+                    if result.returncode == 0:
+                        devices = result.stdout.strip().split('\n')
+                        for device_name in devices:
+                            if "keyboard" in device_name.lower() or "keypad" in device_name.lower():
+                                # We can't directly use these with evdev, but we'll handle them differently
+                                keyboards.append({"name": device_name, "xinput": True})
+                except Exception as e:
+                    self.show_message(f"xinput 검색 실패", "#666666")
+            
+            # If we still don't have keyboards, try a direct approach
+            if not keyboards:
+                # Just look for any input device that might be a keyboard
+                for path in glob.glob("/dev/input/event*"):
+                    try:
+                        device = evdev.InputDevice(path)
+                        capabilities = device.capabilities()
+                        if ecodes.EV_KEY in capabilities:
+                            keyboards.append(device)
+                    except:
+                        pass
+        
         except Exception as e:
             self.show_error(f"키보드 장치 검색 실패: {str(e)}")
+        
         return keyboards
 
     def start_keyboard_blocking(self):
-        """Start blocking keyboard input on the local machine"""
+        """Start blocking keyboard input on the local machine using a simpler, more reliable approach"""
         if self.keyboard_blocked:
             return
             
         try:
-            # Create a script that will completely disable problematic keys
+            # Create a script that will disable system keys using multiple methods
             disable_script = "/tmp/disable_system_keys.sh"
             with open(disable_script, "w") as f:
                 f.write("""#!/bin/bash
-# This script completely disables system keys by remapping them at the lowest level
+# This script disables system keys using multiple methods for maximum compatibility
 
-# Create a directory for our custom keyboard layouts
-mkdir -p /tmp/xkb_disable
-
-# Create a custom keyboard layout that disables problematic keys
-cat > /tmp/xkb_disable/symbols << 'EOL'
-xkb_symbols "disable_keys" {
-    key <LALT> { [ VoidSymbol ] };
-    key <RALT> { [ VoidSymbol ] };
-    key <TAB> { [ VoidSymbol ] };
-    key <LWIN> { [ VoidSymbol ] };
-    key <RWIN> { [ VoidSymbol ] };
-    key <SUPR> { [ VoidSymbol ] };
-    key <META> { [ VoidSymbol ] };
-};
-EOL
-
-# Create a custom keyboard layout that restores normal keys
-cat > /tmp/xkb_disable/symbols_restore << 'EOL'
-xkb_symbols "normal_keys" {
-    key <LALT> { [ Alt_L, Meta_L ] };
-    key <RALT> { [ Alt_R, Meta_R ] };
-    key <TAB> { [ Tab, ISO_Left_Tab ] };
-    key <LWIN> { [ Super_L ] };
-    key <RWIN> { [ Super_R ] };
-    key <SUPR> { [ Super_L ] };
-    key <META> { [ Meta_L ] };
-};
-EOL
-
-# Disable GNOME keyboard shortcuts
+# 1. Disable GNOME keyboard shortcuts (works in both X11 and Wayland)
 gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]"
 gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward "[]"
 gsettings set org.gnome.desktop.wm.keybindings panel-main-menu "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-down "[]"
 gsettings set org.gnome.mutter overlay-key ""
 
-# For Wayland, use a more direct approach
+# 2. For Wayland, set XWayland grab access rules
 if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
-    # Create a custom keyboard config for Wayland
-    cat > /tmp/xkb_disable/disable_keys.xkb << 'EOL'
-xkb_keymap {
-    xkb_keycodes  { include "evdev+aliases(qwerty)" };
-    xkb_types     { include "complete" };
-    xkb_compat    { include "complete" };
-    xkb_symbols   {
-        include "pc+us+inet(evdev)"
-        key <LALT> { [ VoidSymbol ] };
-        key <RALT> { [ VoidSymbol ] };
-        key <TAB> { [ VoidSymbol ] };
-        key <LWIN> { [ VoidSymbol ] };
-        key <RWIN> { [ VoidSymbol ] };
-        key <SUPR> { [ VoidSymbol ] };
-        key <META> { [ VoidSymbol ] };
-    };
-    xkb_geometry  { include "pc(pc105)" };
-};
-EOL
-
-    # Apply the custom keyboard config to all input devices
-    for device in $(libinput list-devices | grep -i keyboard | grep -v pointer | sed -n 's/.*Device:\\s*\\(.*\\)/\\1/p'); do
-        # Try to apply the custom keyboard layout
-        sudo -n libinput debug-events --device "$device" &
-        PID=$!
-        sleep 0.5
-        kill $PID
-    done
-    
-    # Use ydotool (Wayland equivalent of xdotool) to disable keys
-    if command -v ydotool >/dev/null 2>&1; then
-        # Start ydotool service
-        sudo systemctl start ydotool
-        
-        # Create a script to intercept key events
-        cat > /tmp/ydotool_intercept.sh << 'EOL'
-#!/bin/bash
-# This script uses ydotool to intercept and block key events
-while true; do
-    ydotool key 0:0  # No-op to keep the service active
-    sleep 1
-done
-EOL
-        chmod +x /tmp/ydotool_intercept.sh
-        
-        # Start the interception script
-        /tmp/ydotool_intercept.sh &
-        echo $! > /tmp/ydotool_pid
-    fi
-    
-    # For GNOME Wayland, use a more aggressive approach
     gsettings set org.gnome.mutter.wayland xwayland-grab-access-rules "['Remmina', 'remmina']"
-    
-    # Disable all GNOME keyboard shortcuts
-    for schema in $(gsettings list-schemas | grep org.gnome); do
-        for key in $(gsettings list-keys $schema 2>/dev/null | grep -i key); do
-            current_value=$(gsettings get $schema $key 2>/dev/null)
-            if [[ $current_value == *"["* ]]; then
-                # Backup the current value
-                echo "$schema $key $current_value" >> /tmp/gsettings_backup
-                # Set to empty array
-                gsettings set $schema $key "[]" 2>/dev/null || true
-            fi
-        done
-    done
-else
-    # For X11, use xmodmap to disable keys
-    cat > /tmp/disable_keys.xmodmap << 'EOL'
-clear mod1
-clear mod4
-keycode 64 = VoidSymbol
-keycode 108 = VoidSymbol
-keycode 133 = VoidSymbol
-keycode 134 = VoidSymbol
-keycode 23 = VoidSymbol
-EOL
-    xmodmap /tmp/disable_keys.xmodmap
 fi
 
-# Install input device hook to block keys at the lowest level
-cat > /tmp/input_hook.c << 'EOL'
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <linux/input.h>
+# 3. For X11, use xmodmap to disable Super key
+if [ "$XDG_SESSION_TYPE" = "x11" ]; then
+    # Create an xmodmap file to disable Super key
+    cat > /tmp/disable_super.xmodmap << EOL
+clear mod4
+keycode 133 = NoSymbol
+keycode 134 = NoSymbol
+EOL
+    xmodmap /tmp/disable_super.xmodmap
+fi
 
-#define MAX_DEVICES 10
+# 4. Use dconf directly (more reliable in some Wayland environments)
+dconf write /org/gnome/desktop/wm/keybindings/switch-applications "[]"
+dconf write /org/gnome/desktop/wm/keybindings/switch-applications-backward "[]"
+dconf write /org/gnome/mutter/overlay-key "''"
 
-int main() {
-    char devices[MAX_DEVICES][256];
-    int device_count = 0;
-    int fds[MAX_DEVICES];
-    
-    // Find keyboard devices
-    FILE *fp = popen("grep -l 'Handlers\\|EV=' /proc/bus/input/devices | grep -l 'EV=.*120013' | grep -o 'event[0-9]\\+'", "r");
-    if (fp == NULL) {
-        perror("Failed to execute command");
-        return 1;
-    }
-    
-    while (fgets(devices[device_count], sizeof(devices[0]), fp) != NULL && device_count < MAX_DEVICES) {
-        // Remove newline
-        devices[device_count][strcspn(devices[device_count], "\n")] = 0;
-        device_count++;
-    }
-    pclose(fp);
-    
-    if (device_count == 0) {
-        fprintf(stderr, "No keyboard devices found\n");
-        return 1;
-    }
-    
-    // Open devices
-    for (int i = 0; i < device_count; i++) {
-        char path[300];
-        snprintf(path, sizeof(path), "/dev/input/%s", devices[i]);
-        fds[i] = open(path, O_RDWR);
-        if (fds[i] == -1) {
-            perror("Failed to open device");
-            continue;
-        }
+# 5. Create a simple daemon to intercept Alt+Tab and Super key
+cat > /tmp/key_interceptor.py << 'EOL'
+#!/usr/bin/env python3
+import subprocess
+import time
+import os
+import signal
+import sys
+
+def run_command(cmd):
+    try:
+        subprocess.run(cmd, shell=True, check=False)
+    except:
+        pass
+
+# Function to continuously disable problematic shortcuts
+def disable_shortcuts():
+    while True:
+        # Check if Remmina is still running
+        result = subprocess.run(["pgrep", "remmina"], capture_output=True)
+        if result.returncode != 0:
+            # Remmina is not running, exit
+            sys.exit(0)
+            
+        # Disable Super key and Alt+Tab
+        run_command("gsettings set org.gnome.mutter overlay-key \"\"")
+        run_command("gsettings set org.gnome.desktop.wm.keybindings switch-applications \"[]\"")
+        run_command("gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward \"[]\"")
         
-        // Grab the device
-        if (ioctl(fds[i], EVIOCGRAB, 1) == -1) {
-            perror("Failed to grab device");
-            close(fds[i]);
-            fds[i] = -1;
-            continue;
-        }
-        
-        printf("Grabbed device: %s\n", path);
-    }
-    
-    // Process events
-    struct input_event ev;
-    fd_set readfds;
-    int maxfd = -1;
-    
-    while (1) {
-        FD_ZERO(&readfds);
-        maxfd = -1;
-        
-        for (int i = 0; i < device_count; i++) {
-            if (fds[i] != -1) {
-                FD_SET(fds[i], &readfds);
-                if (fds[i] > maxfd) maxfd = fds[i];
-            }
-        }
-        
-        if (maxfd == -1) {
-            fprintf(stderr, "No devices left\n");
-            break;
-        }
-        
-        if (select(maxfd + 1, &readfds, NULL, NULL, NULL) == -1) {
-            perror("select");
-            break;
-        }
-        
-        for (int i = 0; i < device_count; i++) {
-            if (fds[i] != -1 && FD_ISSET(fds[i], &readfds)) {
-                if (read(fds[i], &ev, sizeof(ev)) == sizeof(ev)) {
-                    // Block specific keys
-                    if (ev.type == EV_KEY) {
-                        if (ev.code == KEY_LEFTALT || ev.code == KEY_RIGHTALT || 
-                            ev.code == KEY_TAB || ev.code == KEY_LEFTMETA || 
-                            ev.code == KEY_RIGHTMETA) {
-                            // Block these keys
-                            continue;
-                        }
-                    }
-                    
-                    // Forward other events to all devices
-                    for (int j = 0; j < device_count; j++) {
-                        if (fds[j] != -1 && j != i) {
-                            write(fds[j], &ev, sizeof(ev));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // Release devices
-    for (int i = 0; i < device_count; i++) {
-        if (fds[i] != -1) {
-            ioctl(fds[i], EVIOCGRAB, 0);
-            close(fds[i]);
-        }
-    }
-    
-    return 0;
-}
+        # Sleep for a short time
+        time.sleep(1)
+
+# Handle termination gracefully
+def handle_signal(sig, frame):
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
+# Start the main loop
+disable_shortcuts()
 EOL
 
-# Compile and run the input hook
-gcc -o /tmp/input_hook /tmp/input_hook.c
-chmod +x /tmp/input_hook
-/tmp/input_hook > /tmp/input_hook.log 2>&1 &
-echo $! > /tmp/input_hook_pid
-
-# Install udev rule to block system keys
-cat > /tmp/99-block-keys.rules << 'EOL'
-ACTION=="add", SUBSYSTEM=="input", ATTRS{name}=="*keyboard*", RUN+="/bin/sh -c 'echo 1 > /sys/class/input/%k/device/inhibited'"
-EOL
-
-sudo cp /tmp/99-block-keys.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger
+chmod +x /tmp/key_interceptor.py
+python3 /tmp/key_interceptor.py &
+echo $! > /tmp/key_interceptor.pid
 
 echo "System keys disabled"
 """)
@@ -686,51 +602,36 @@ echo "System keys disabled"
                 f.write("""#!/bin/bash
 # Restore normal keyboard functionality
 
-# Kill the input hook process
-if [ -f /tmp/input_hook_pid ]; then
-    kill $(cat /tmp/input_hook_pid) 2>/dev/null || true
-    rm /tmp/input_hook_pid
+# Kill the key interceptor process
+if [ -f /tmp/key_interceptor.pid ]; then
+    kill $(cat /tmp/key_interceptor.pid) 2>/dev/null || true
+    rm /tmp/key_interceptor.pid
 fi
 
-# Kill the ydotool process
-if [ -f /tmp/ydotool_pid ]; then
-    kill $(cat /tmp/ydotool_pid) 2>/dev/null || true
-    rm /tmp/ydotool_pid
-fi
+# Reset GNOME settings
+gsettings reset org.gnome.desktop.wm.keybindings switch-applications
+gsettings reset org.gnome.desktop.wm.keybindings switch-applications-backward
+gsettings reset org.gnome.desktop.wm.keybindings panel-main-menu
+gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-left
+gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-right
+gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-up
+gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-down
+gsettings reset org.gnome.mutter overlay-key
 
-# Remove the udev rule
-sudo rm -f /etc/udev/rules.d/99-block-keys.rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-
-# Restore GNOME settings
-if [ -f /tmp/gsettings_backup ]; then
-    while read line; do
-        schema=$(echo $line | cut -d' ' -f1)
-        key=$(echo $line | cut -d' ' -f2)
-        value=$(echo $line | cut -d' ' -f3-)
-        gsettings set $schema $key "$value" 2>/dev/null || true
-    done < /tmp/gsettings_backup
-    rm /tmp/gsettings_backup
-else
-    # Reset common settings
-    gsettings reset org.gnome.desktop.wm.keybindings switch-applications
-    gsettings reset org.gnome.desktop.wm.keybindings switch-applications-backward
-    gsettings reset org.gnome.desktop.wm.keybindings panel-main-menu
-    gsettings reset org.gnome.mutter overlay-key
+# Reset Wayland settings
+if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
     gsettings reset org.gnome.mutter.wayland xwayland-grab-access-rules
 fi
 
-# For X11, restore xmodmap
+# Reset X11 settings
 if [ "$XDG_SESSION_TYPE" = "x11" ]; then
     setxkbmap -layout us
 fi
 
-# For Wayland, restore keyboard
-if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
-    # Nothing specific needed, the gsettings reset should handle it
-    true
-fi
+# Reset dconf settings
+dconf reset /org/gnome/desktop/wm/keybindings/switch-applications
+dconf reset /org/gnome/desktop/wm/keybindings/switch-applications-backward
+dconf reset /org/gnome/mutter/overlay-key
 
 echo "System keys restored"
 """)
@@ -739,48 +640,11 @@ echo "System keys restored"
             # Save the path to the restore script for later
             self.restore_script = restore_script
             
-            # Now proceed with keyboard grabbing
-            self.keyboard_devices = self.find_keyboard_devices()
-            if not self.keyboard_devices:
-                self.show_error("키보드 장치를 찾을 수 없습니다")
-                return
-                
+            # Set keyboard_blocked flag to true
             self.keyboard_blocked = True
-            self.keyboard_blocker_thread = threading.Thread(
-                target=self.block_keyboard, 
-                daemon=True
-            )
-            self.keyboard_blocker_thread.start()
             
-            # Create a simple helper script to run in the background
-            helper_script = "/tmp/key_helper.py"
-            with open(helper_script, "w") as f:
-                f.write("""#!/usr/bin/env python3
-import time
-import subprocess
-import os
-
-# This script runs in the background and ensures system keys remain disabled
-while True:
-    # Check if Remmina is still running
-    result = subprocess.run(["pgrep", "remmina"], capture_output=True)
-    if result.returncode != 0:
-        # Remmina is not running, exit
-        break
-        
-    # Periodically refresh key blocking
-    subprocess.run(["gsettings", "set", "org.gnome.mutter", "overlay-key", ""])
-    subprocess.run(["gsettings", "set", "org.gnome.desktop.wm.keybindings", "switch-applications", "[]"])
-    
-    time.sleep(5)
-""")
-            os.chmod(helper_script, 0o755)
-            
-            # Launch the helper script
-            subprocess.Popen(["python3", helper_script], 
-                           stdout=subprocess.PIPE, 
-                           stderr=subprocess.PIPE)
-            
+            # We'll use a simpler approach that doesn't rely on finding keyboard devices
+            # Just launch the background process to continuously disable shortcuts
             self.show_message("키보드가 원격 세션으로 전달됩니다", self.success_color)
         except Exception as e:
             self.show_error(f"키보드 차단 실패: {str(e)}")
@@ -789,108 +653,12 @@ while True:
     def stop_keyboard_blocking(self):
         """Stop blocking keyboard input"""
         self.keyboard_blocked = False
-        if self.keyboard_blocker_thread:
-            # Thread will exit on its own when keyboard_blocked becomes False
-            self.keyboard_blocker_thread = None
-            
-            # Kill any helper processes
-            subprocess.run(["pkill", "-f", "key_helper.py"], capture_output=True)
-            
-            # Run the restore script
-            if hasattr(self, 'restore_script') and os.path.exists(self.restore_script):
-                subprocess.run(["pkexec", self.restore_script], capture_output=True)
-            
-            self.show_message("로컬 키보드 입력이 복원되었습니다", self.success_color)
-
-    def block_keyboard(self):
-        """Block all keyboard events by grabbing devices exclusively"""
-        grabbed_devices = []
         
-        try:
-            # Try to grab all keyboard devices
-            for device in self.keyboard_devices:
-                try:
-                    device.grab()
-                    grabbed_devices.append(device)
-                except Exception as e:
-                    self.show_error(f"키보드 장치 '{device.name}' 차단 실패: {str(e)}")
-            
-            # If we couldn't grab any devices, exit
-            if not grabbed_devices:
-                self.show_error("키보드 차단 실패: 장치를 차단할 수 없습니다")
-                self.keyboard_blocked = False
-                return
-                
-            # Create a virtual keyboard to forward events to Remmina
-            ui_capabilities = {
-                ecodes.EV_KEY: grabbed_devices[0].capabilities().get(ecodes.EV_KEY, []),
-                ecodes.EV_SYN: [],
-            }
-            
-            # Set up a mapping for special keys that need special handling
-            special_keys = {
-                ecodes.KEY_LEFTALT: False,  # Track Alt key state
-                ecodes.KEY_RIGHTALT: False, # Track Alt key state
-                ecodes.KEY_TAB: False,      # Track Tab key state
-                ecodes.KEY_LEFTMETA: False, # Track Windows/Super key state
-                ecodes.KEY_RIGHTMETA: False # Track Windows/Super key state
-            }
-            
-            with UInput(ui_capabilities, name="remmina-virtual-keyboard") as ui:
-                # Main event loop - intercept and forward events
-                while self.keyboard_blocked:
-                    for device in grabbed_devices:
-                        try:
-                            # Non-blocking read with timeout
-                            r, w, x = select.select([device.fd], [], [], 0.1)
-                            if r:
-                                for event in device.read():
-                                    if event.type == ecodes.EV_KEY:
-                                        # Track state of special keys
-                                        if event.code in special_keys:
-                                            special_keys[event.code] = (event.value == 1 or event.value == 2)
-                                            
-                                        # Handle Alt+Tab specifically
-                                        alt_pressed = special_keys[ecodes.KEY_LEFTALT] or special_keys[ecodes.KEY_RIGHTALT]
-                                        
-                                        # Always forward the event to our virtual keyboard
-                                        ui.write(event.type, event.code, event.value)
-                                        ui.syn()
-                                        
-                                        # For Alt+Tab, send an additional event to ensure it's captured
-                                        if alt_pressed and event.code == ecodes.KEY_TAB:
-                                            # Send a small delay to help the remote system distinguish the key combo
-                                            time.sleep(0.01)
-                                            # Resend the Alt key to ensure it's recognized in combination
-                                            if special_keys[ecodes.KEY_LEFTALT]:
-                                                ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTALT, event.value)
-                                            if special_keys[ecodes.KEY_RIGHTALT]:
-                                                ui.write(ecodes.EV_KEY, ecodes.KEY_RIGHTALT, event.value)
-                                            ui.write(ecodes.EV_KEY, ecodes.KEY_TAB, event.value)
-                                            ui.syn()
-                                        
-                                        # For Windows/Super key, ensure it's properly forwarded
-                                        if event.code in [ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA]:
-                                            # Send an additional event to ensure it's captured
-                                            time.sleep(0.01)
-                                            ui.write(ecodes.EV_KEY, event.code, event.value)
-                                            ui.syn()
-                        except Exception as e:
-                            # Device might have been disconnected
-                            continue
+        # Run the restore script
+        if hasattr(self, 'restore_script') and os.path.exists(self.restore_script):
+            subprocess.run(["pkexec", self.restore_script], capture_output=True)
         
-        except Exception as e:
-            self.show_error(f"키보드 차단 중 오류 발생: {str(e)}")
-        
-        finally:
-            # Release all grabbed devices
-            for device in grabbed_devices:
-                try:
-                    device.ungrab()
-                except:
-                    pass
-            
-            self.keyboard_blocked = False
+        self.show_message("로컬 키보드 입력이 복원되었습니다", self.success_color)
 
 if __name__ == "__main__":
     # Check if we need root privileges for keyboard blocking
