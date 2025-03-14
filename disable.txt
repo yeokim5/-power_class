@@ -1,3 +1,50 @@
+# Disable application switcher (Alt + Tab)
+gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]"
+
+# Disable window switcher (Super + Tab)
+gsettings set org.gnome.desktop.wm.keybindings switch-windows "[]"
+
+# Disable closing windows (Alt + F4)
+gsettings set org.gnome.desktop.wm.keybindings close "[]"
+
+# Disable minimize (Super + H)
+gsettings set org.gnome.desktop.wm.keybindings minimize "[]"
+
+# Disable toggle fullscreen (F11)
+gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "[]"
+
+# Disable activate window menu (Alt + Space)
+gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"
+
+# Disable run dialog (Alt + F2)
+gsettings set org.gnome.desktop.wm.keybindings panel-run-dialog "[]"
+
+# Disable show desktop (Super + D)
+gsettings set org.gnome.desktop.wm.keybindings show-desktop "[]"
+
+# Disable overlay key (Super/Windows Key)
+gsettings set org.gnome.mutter overlay-key ""
+
+# Disable workspace navigation (Ctrl + Alt + Up/Down)
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-down "[]"
+
+# Disable moving windows between workspaces (Shift + Ctrl + Alt + Up/Down)
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-up "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-down "[]"
+
+# Disable terminal shortcut (Ctrl + Alt + T)
+gsettings set org.gnome.settings-daemon.plugins.media-keys terminal "[]"
+
+# Disable window resize (Alt + F8)
+gsettings set org.gnome.desktop.wm.keybindings begin-resize "[]"
+
+# Disable window move (Alt + F7)
+gsettings set org.gnome.desktop.wm.keybindings begin-move "[]"
+
+
+
+
 gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]"
 gsettings set org.gnome.desktop.wm.keybindings switch-windows "[]"
 gsettings set org.gnome.desktop.wm.keybindings close "[]"
@@ -7,6 +54,17 @@ gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"
 gsettings set org.gnome.desktop.wm.keybindings panel-run-dialog "[]"
 gsettings set org.gnome.desktop.wm.keybindings show-desktop "[]"
 gsettings set org.gnome.mutter overlay-key ""
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "[]"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-down "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-up "[]"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-down "[]"
+gsettings set org.gnome.settings-daemon.plugins.media-keys terminal "[]"
+gsettings set org.gnome.desktop.wm.keybindings begin-resize "[]"
+gsettings set org.gnome.desktop.wm.keybindings begin-move "[]"
+
+
+
+
 
 
 dconf reset -f /org/gnome/
