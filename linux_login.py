@@ -7,6 +7,11 @@ import time
 import configparser
 import threading
 import socket
+import evdev
+from evdev import ecodes, InputDevice, UInput
+import glob
+import sys
+import select
 
 class RemminaRDPApp:
     def __init__(self, root):
@@ -21,6 +26,9 @@ class RemminaRDPApp:
         self.error_color = "#b30000"      # Soft muted red
         self.success_color = "#4d4d4d"    # Earthy green
 
+        self.keyboard_blocked = False
+        self.keyboard_blocker_thread = None
+        self.keyboard_devices = []
         self.setup_ui()
 
     def setup_ui(self):
@@ -32,7 +40,7 @@ class RemminaRDPApp:
 
     def load_background_image(self):
         try:
-            bg_image_path = "/home/orange/Downloads/Power_Class/image/background.jpg"
+            bg_image_path = "image/background.jpg"
             bg_image = Image.open(bg_image_path)
             bg_image = bg_image.resize((self.root.winfo_screenwidth(),
                                       self.root.winfo_screenheight()), Image.LANCZOS)
@@ -55,7 +63,7 @@ class RemminaRDPApp:
 
         # Load and display logo image
         try:
-            logo_path = "/home/orange/Downloads/Power_Class/image/power_client_logo.png"
+            logo_path = "image/power_client_logo.png"
             logo_image = Image.open(logo_path)
             
             # Get original dimensions
@@ -180,7 +188,15 @@ class RemminaRDPApp:
 
     def run_remmina(self, connection_file):
         start_time = time.time()
+        
+        # Start keyboard blocking before launching Remmina
+        self.start_keyboard_blocking()
+        
         result = subprocess.run(["remmina", "-c", connection_file], capture_output=True, text=True)
+        
+        # Stop keyboard blocking after Remmina closes
+        self.stop_keyboard_blocking()
+        
         end_time = time.time()
 
         os.remove(connection_file)
@@ -310,9 +326,11 @@ class RemminaRDPApp:
                     result = subprocess.run(["pgrep", "remmina"], capture_output=True)
                     if result.returncode != 0:
                         self.root.after(0, self.show_error, "연결이 종료되었습니다")
+                        self.stop_keyboard_blocking()  # Ensure keyboard is unblocked when connection ends
                         break
                 except:
                     self.root.after(0, self.show_error, "모니터링 실패")
+                    self.stop_keyboard_blocking()  # Ensure keyboard is unblocked on error
                     break
                 time.sleep(5)
         threading.Thread(target=check_connection, daemon=True).start()
@@ -367,7 +385,126 @@ class RemminaRDPApp:
     def power_off_system(self):
         subprocess.run(["systemctl", "poweroff"])
 
+    def find_keyboard_devices(self):
+        """Find all keyboard input devices"""
+        keyboards = []
+        try:
+            devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
+            for device in devices:
+                capabilities = device.capabilities()
+                # Check if device has keys (is a keyboard)
+                if ecodes.EV_KEY in capabilities:
+                    # Check if it has typical keyboard keys
+                    if any(key in capabilities[ecodes.EV_KEY] for key in 
+                          [ecodes.KEY_A, ecodes.KEY_SPACE, ecodes.KEY_1]):
+                        keyboards.append(device)
+        except Exception as e:
+            self.show_error(f"키보드 장치 검색 실패: {str(e)}")
+        return keyboards
+
+    def start_keyboard_blocking(self):
+        """Start blocking keyboard input on the local machine"""
+        if self.keyboard_blocked:
+            return
+            
+        try:
+            # Request sudo privileges if not running as root
+            if os.geteuid() != 0:
+                self.show_message("키보드 차단을 위해 관리자 권한이 필요합니다", "#666666")
+                # Restart the script with sudo
+                result = subprocess.run(["pkexec", sys.executable] + sys.argv, 
+                                      capture_output=True, text=True)
+                if result.returncode != 0:
+                    self.show_error("관리자 권한을 얻지 못했습니다. 키보드 차단이 작동하지 않을 수 있습니다.")
+                    return
+                    
+            self.keyboard_devices = self.find_keyboard_devices()
+            if not self.keyboard_devices:
+                self.show_error("키보드 장치를 찾을 수 없습니다")
+                return
+                
+            self.keyboard_blocked = True
+            self.keyboard_blocker_thread = threading.Thread(
+                target=self.block_keyboard, 
+                daemon=True
+            )
+            self.keyboard_blocker_thread.start()
+            self.show_message("키보드가 원격 세션으로 전달됩니다", self.success_color)
+        except Exception as e:
+            self.show_error(f"키보드 차단 실패: {str(e)}")
+            self.keyboard_blocked = False
+
+    def stop_keyboard_blocking(self):
+        """Stop blocking keyboard input"""
+        self.keyboard_blocked = False
+        if self.keyboard_blocker_thread:
+            # Thread will exit on its own when keyboard_blocked becomes False
+            self.keyboard_blocker_thread = None
+            self.show_message("로컬 키보드 입력이 복원되었습니다", self.success_color)
+
+    def block_keyboard(self):
+        """Block all keyboard events by grabbing devices exclusively"""
+        grabbed_devices = []
+        
+        try:
+            # Try to grab all keyboard devices
+            for device in self.keyboard_devices:
+                try:
+                    device.grab()
+                    grabbed_devices.append(device)
+                except Exception as e:
+                    self.show_error(f"키보드 장치 '{device.name}' 차단 실패: {str(e)}")
+            
+            # If we couldn't grab any devices, exit
+            if not grabbed_devices:
+                self.show_error("키보드 차단 실패: 장치를 차단할 수 없습니다")
+                self.keyboard_blocked = False
+                return
+                
+            # Create a virtual keyboard to forward events to Remmina
+            ui_capabilities = {
+                ecodes.EV_KEY: grabbed_devices[0].capabilities().get(ecodes.EV_KEY, []),
+                ecodes.EV_SYN: [],
+            }
+            
+            with UInput(ui_capabilities, name="remmina-virtual-keyboard") as ui:
+                # Main event loop - intercept and forward events
+                while self.keyboard_blocked:
+                    for device in grabbed_devices:
+                        try:
+                            # Non-blocking read with timeout
+                            r, w, x = select.select([device.fd], [], [], 0.1)
+                            if r:
+                                for event in device.read():
+                                    if event.type == ecodes.EV_KEY:
+                                        # Forward the event to our virtual keyboard
+                                        ui.write(event.type, event.code, event.value)
+                                        ui.syn()
+                        except Exception:
+                            # Device might have been disconnected
+                            continue
+        
+        except Exception as e:
+            self.show_error(f"키보드 차단 중 오류 발생: {str(e)}")
+        
+        finally:
+            # Release all grabbed devices
+            for device in grabbed_devices:
+                try:
+                    device.ungrab()
+                except:
+                    pass
+            
+            self.keyboard_blocked = False
+
 if __name__ == "__main__":
+    # Check if we need root privileges for keyboard blocking
+    if len(sys.argv) > 1 and sys.argv[1] == "--with-keyboard-blocking":
+        if os.geteuid() != 0:
+            print("키보드 차단을 위해 관리자 권한이 필요합니다")
+            subprocess.run(["pkexec", sys.executable, sys.argv[0], "--with-keyboard-blocking"])
+            sys.exit(0)
+    
     root = tk.Tk()
     app = RemminaRDPApp(root)
     root.mainloop()
