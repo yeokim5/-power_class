@@ -7,11 +7,6 @@ import time
 import configparser
 import threading
 import socket
-import evdev
-from evdev import ecodes, InputDevice, UInput
-import glob
-import sys
-import select
 
 class RemminaRDPApp:
     def __init__(self, root):
@@ -26,9 +21,6 @@ class RemminaRDPApp:
         self.error_color = "#b30000"      # Soft muted red
         self.success_color = "#4d4d4d"    # Earthy green
 
-        self.keyboard_blocked = False
-        self.keyboard_blocker_thread = None
-        self.keyboard_devices = []
         self.setup_ui()
 
     def setup_ui(self):
@@ -40,7 +32,7 @@ class RemminaRDPApp:
 
     def load_background_image(self):
         try:
-            bg_image_path = "image/background.jpg"
+            bg_image_path = "/home/orange/Downloads/Power_Class/image/background.jpg"
             bg_image = Image.open(bg_image_path)
             bg_image = bg_image.resize((self.root.winfo_screenwidth(),
                                       self.root.winfo_screenheight()), Image.LANCZOS)
@@ -63,7 +55,7 @@ class RemminaRDPApp:
 
         # Load and display logo image
         try:
-            logo_path = "image/power_client_logo.png"
+            logo_path = "/home/orange/Downloads/Power_Class/image/power_client_logo.png"
             logo_image = Image.open(logo_path)
             
             # Get original dimensions
@@ -188,45 +180,10 @@ class RemminaRDPApp:
 
     def run_remmina(self, connection_file):
         start_time = time.time()
-        
-        # Start keyboard blocking before launching Remmina
-        self.start_keyboard_blocking()
-        
-        # Add a small delay to ensure keyboard blocking is in effect
-        time.sleep(1)
-        
-        # Launch Remmina with special parameters to help with keyboard grabbing
-        env = os.environ.copy()
-        env["REMMINA_DISABLE_SHORTCUTS"] = "1"  # Custom env var that some Remmina builds recognize
-        
-        # Create a wrapper script to launch Remmina with the right parameters
-        wrapper_script = "/tmp/launch_remmina.sh"
-        with open(wrapper_script, "w") as f:
-            f.write(f"""#!/bin/bash
-# Launch Remmina with keyboard grabbing enabled
-export REMMINA_DISABLE_SHORTCUTS=1
-export REMMINA_KEYBOARD_GRAB=1
-
-# For Wayland, set some environment variables that might help
-if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
-    export GDK_BACKEND=x11
-fi
-
-# Launch Remmina
-remmina -c "{connection_file}"
-""")
-        os.chmod(wrapper_script, 0o755)
-        
-        # Run the wrapper script
-        result = subprocess.run([wrapper_script], env=env, capture_output=True, text=True)
-        
-        # Stop keyboard blocking after Remmina closes
-        self.stop_keyboard_blocking()
-        
+        result = subprocess.run(["remmina", "-c", connection_file], capture_output=True, text=True)
         end_time = time.time()
 
         os.remove(connection_file)
-        os.remove(wrapper_script)
 
         if result.returncode != 0:
             self.root.after(0, self.show_error, f"연결 실패: {result.stderr}")
@@ -248,11 +205,21 @@ remmina -c "{connection_file}"
             'hide_toolbar': 'true',
             'viewmode': '4',
             'fullscreen': '1',
-            'quality': '9',
-            'grab_keyboard': '1',
-            'keyboard_grab': '1',  # Additional setting for newer Remmina versions
-            'keyboard_grab_policy': '2',  # Force grab
-            'hostkey': '65508'
+            'quality': '0',  # 0 = Poor (fastest), 1 = Medium, 2 = Good, 9 = Best (adjust as needed)
+            # Performance optimizations
+            'colordepth': '16',  # Reduce to 16-bit color depth for less data
+            'disable_wallpaper': '1',  # Disable desktop background
+            'disable_full_window_drag': '1',  # Disable dragging full window contents
+            'disable_menu_animations': '1',  # Disable menu animations
+            'disable_themes': '1',  # Disable visual themes
+            'disable_cursor_shadow': '1',  # Disable cursor shadow
+            'disable_fontsmoothing': '1',  # Disable font smoothing
+            'enable_compression': '1',  # Enable data compression
+            'network': 'lan',  # Optimize for LAN (use 'broadband' or 'modem' if needed)
+            # Advanced acceleration options (if supported by server)
+            'gfx': '1',  # Enable Graphics Extensions (RemoteFX or similar)
+            'gfx_h264': '1',  # Enable H.264 encoding (requires FreeRDP support)
+            'resolution': f'{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}'  # Match client resolution
         }
 
         temp_file = os.path.expanduser('~/.local/share/remmina/temp.remmina')
@@ -355,11 +322,9 @@ remmina -c "{connection_file}"
                     result = subprocess.run(["pgrep", "remmina"], capture_output=True)
                     if result.returncode != 0:
                         self.root.after(0, self.show_error, "연결이 종료되었습니다")
-                        self.stop_keyboard_blocking()  # Ensure keyboard is unblocked when connection ends
                         break
                 except:
                     self.root.after(0, self.show_error, "모니터링 실패")
-                    self.stop_keyboard_blocking()  # Ensure keyboard is unblocked on error
                     break
                 time.sleep(5)
         threading.Thread(target=check_connection, daemon=True).start()
@@ -414,175 +379,7 @@ remmina -c "{connection_file}"
     def power_off_system(self):
         subprocess.run(["systemctl", "poweroff"])
 
-    def start_keyboard_blocking(self):
-        """Start blocking keyboard input on the local machine using a pure shortcut-disabling approach"""
-        if self.keyboard_blocked:
-            return
-            
-        try:
-            # Create a script that will disable system keys using multiple methods
-            disable_script = "/tmp/disable_system_keys.sh"
-            with open(disable_script, "w") as f:
-                f.write("""#!/bin/bash
-# This script disables system keys using multiple methods for maximum compatibility
-
-# 1. Disable GNOME keyboard shortcuts (works in both X11 and Wayland)
-gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]"
-gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward "[]"
-gsettings set org.gnome.desktop.wm.keybindings panel-main-menu "[]"
-gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "[]"
-gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]"
-gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "[]"
-gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-down "[]"
-gsettings set org.gnome.mutter overlay-key ""
-
-# 2. For Wayland, set XWayland grab access rules
-if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
-    gsettings set org.gnome.mutter.wayland xwayland-grab-access-rules "['Remmina', 'remmina']"
-fi
-
-# 3. For X11, use xmodmap to disable Super key
-if [ "$XDG_SESSION_TYPE" = "x11" ]; then
-    # Create an xmodmap file to disable Super key
-    cat > /tmp/disable_super.xmodmap << EOL
-clear mod4
-keycode 133 = NoSymbol
-keycode 134 = NoSymbol
-EOL
-    xmodmap /tmp/disable_super.xmodmap
-fi
-
-# 4. Use dconf directly (more reliable in some Wayland environments)
-dconf write /org/gnome/desktop/wm/keybindings/switch-applications "[]"
-dconf write /org/gnome/desktop/wm/keybindings/switch-applications-backward "[]"
-dconf write /org/gnome/mutter/overlay-key "''"
-
-# 5. Create a simple daemon to intercept Alt+Tab and Super key
-cat > /tmp/key_interceptor.py << 'EOL'
-#!/usr/bin/env python3
-import subprocess
-import time
-import os
-import signal
-import sys
-
-def run_command(cmd):
-    try:
-        subprocess.run(cmd, shell=True, check=False)
-    except:
-        pass
-
-# Function to continuously disable problematic shortcuts
-def disable_shortcuts():
-    while True:
-        # Check if Remmina is still running
-        result = subprocess.run(["pgrep", "remmina"], capture_output=True)
-        if result.returncode != 0:
-            # Remmina is not running, exit
-            sys.exit(0)
-            
-        # Disable Super key and Alt+Tab
-        run_command("gsettings set org.gnome.mutter overlay-key \"\"")
-        run_command("gsettings set org.gnome.desktop.wm.keybindings switch-applications \"[]\"")
-        run_command("gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward \"[]\"")
-        
-        # Sleep for a short time
-        time.sleep(1)
-
-# Handle termination gracefully
-def handle_signal(sig, frame):
-    sys.exit(0)
-
-signal.signal(signal.SIGTERM, handle_signal)
-signal.signal(signal.SIGINT, handle_signal)
-
-# Start the main loop
-disable_shortcuts()
-EOL
-
-chmod +x /tmp/key_interceptor.py
-python3 /tmp/key_interceptor.py &
-echo $! > /tmp/key_interceptor.pid
-
-echo "System keys disabled"
-""")
-            os.chmod(disable_script, 0o755)
-            
-            # Run the script to disable system keys
-            subprocess.run(["pkexec", disable_script], capture_output=True)
-            
-            # Create a script to restore keys
-            restore_script = "/tmp/restore_system_keys.sh"
-            with open(restore_script, "w") as f:
-                f.write("""#!/bin/bash
-# Restore normal keyboard functionality
-
-# Kill the key interceptor process
-if [ -f /tmp/key_interceptor.pid ]; then
-    kill $(cat /tmp/key_interceptor.pid) 2>/dev/null || true
-    rm /tmp/key_interceptor.pid
-fi
-
-# Reset GNOME settings
-gsettings reset org.gnome.desktop.wm.keybindings switch-applications
-gsettings reset org.gnome.desktop.wm.keybindings switch-applications-backward
-gsettings reset org.gnome.desktop.wm.keybindings panel-main-menu
-gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-left
-gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-right
-gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-up
-gsettings reset org.gnome.desktop.wm.keybindings switch-to-workspace-down
-gsettings reset org.gnome.mutter overlay-key
-
-# Reset Wayland settings
-if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
-    gsettings reset org.gnome.mutter.wayland xwayland-grab-access-rules
-fi
-
-# Reset X11 settings
-if [ "$XDG_SESSION_TYPE" = "x11" ]; then
-    setxkbmap -layout us
-fi
-
-# Reset dconf settings
-dconf reset /org/gnome/desktop/wm/keybindings/switch-applications
-dconf reset /org/gnome/desktop/wm/keybindings/switch-applications-backward
-dconf reset /org/gnome/mutter/overlay-key
-
-echo "System keys restored"
-""")
-            os.chmod(restore_script, 0o755)
-            
-            # Save the path to the restore script for later
-            self.restore_script = restore_script
-            
-            # Set keyboard_blocked flag to true
-            self.keyboard_blocked = True
-            
-            # We'll use a simpler approach that doesn't rely on finding keyboard devices
-            # Just launch the background process to continuously disable shortcuts
-            self.show_message("키보드가 원격 세션으로 전달됩니다", self.success_color)
-        except Exception as e:
-            self.show_error(f"키보드 차단 실패: {str(e)}")
-            self.keyboard_blocked = False
-
-    def stop_keyboard_blocking(self):
-        """Stop blocking keyboard input"""
-        self.keyboard_blocked = False
-        
-        # Run the restore script
-        if hasattr(self, 'restore_script') and os.path.exists(self.restore_script):
-            subprocess.run(["pkexec", self.restore_script], capture_output=True)
-        
-        self.show_message("로컬 키보드 입력이 복원되었습니다", self.success_color)
-
 if __name__ == "__main__":
-    # Check if we need root privileges for keyboard blocking
-    if len(sys.argv) > 1 and sys.argv[1] == "--with-keyboard-blocking":
-        if os.geteuid() != 0:
-            print("키보드 차단을 위해 관리자 권한이 필요합니다")
-            subprocess.run(["pkexec", sys.executable, sys.argv[0], "--with-keyboard-blocking"])
-            sys.exit(0)
-    
     root = tk.Tk()
     app = RemminaRDPApp(root)
     root.mainloop()
