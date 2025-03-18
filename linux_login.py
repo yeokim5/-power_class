@@ -580,15 +580,6 @@ class RemminaRDPApp:
         try:
             # Create script file for disabling shortcuts
             script_content = """#!/bin/bash
-# Create a backup directory
-mkdir -p ~/gnome-settings-backup
-# Backup ALL keyboard shortcuts and relevant settings
-gsettings list-recursively org.gnome.desktop.wm.keybindings > ~/gnome-settings-backup/wm-keybindings.txt
-gsettings list-recursively org.gnome.mutter.keybindings > ~/gnome-settings-backup/mutter-keybindings.txt
-gsettings list-recursively org.gnome.mutter.wayland.keybindings > ~/gnome-settings-backup/mutter-wayland-keybindings.txt
-gsettings list-recursively org.gnome.shell.keybindings > ~/gnome-settings-backup/shell-keybindings.txt
-gsettings get org.gnome.mutter overlay-key > ~/gnome-settings-backup/overlay-key.txt
-gsettings get org.gnome.desktop.wm.preferences mouse-button-modifier > ~/gnome-settings-backup/mouse-modifier.txt
 # Disable all keybindings in these schemas
 gsettings list-keys org.gnome.desktop.wm.keybindings | while read key; do
   gsettings set org.gnome.desktop.wm.keybindings $key "[]"
@@ -628,23 +619,23 @@ gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "<Super>"
         try:
             # Create script file for restoring shortcuts
             script_content = """#!/bin/bash
-# Restore all keybindings
-cat ~/gnome-settings-backup/wm-keybindings.txt | while read schema key value; do
-  gsettings set $schema $key "$value"
-done
-cat ~/gnome-settings-backup/mutter-keybindings.txt | while read schema key value; do
-  gsettings set $schema $key "$value"
-done
-cat ~/gnome-settings-backup/mutter-wayland-keybindings.txt 2>/dev/null | while read schema key value; do
-  gsettings set $schema $key "$value"
-done
-cat ~/gnome-settings-backup/shell-keybindings.txt | while read schema key value; do
-  gsettings set $schema $key "$value"
-done
-# Restore overlay key (Super key)
-gsettings set org.gnome.mutter overlay-key "$(cat ~/gnome-settings-backup/overlay-key.txt)"
-# Restore mouse modifier
-gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "$(cat ~/gnome-settings-backup/mouse-modifier.txt)"
+# Reset window manager keybindings
+gsettings reset-recursively org.gnome.desktop.wm.keybindings
+
+# Reset mutter keybindings
+gsettings reset-recursively org.gnome.mutter.keybindings
+
+# Reset mutter wayland keybindings (if applicable)
+gsettings reset-recursively org.gnome.mutter.wayland.keybindings
+
+# Reset shell keybindings
+gsettings reset-recursively org.gnome.shell.keybindings
+
+# Reset overlay key to default (usually Super)
+gsettings reset org.gnome.mutter overlay-key
+
+# Reset mouse button modifier to default (usually Alt)
+gsettings reset org.gnome.desktop.wm.preferences mouse-button-modifier
 """
             restore_script_path = os.path.expanduser("~/restore_shortcuts.sh")
             with open(restore_script_path, "w") as f:
