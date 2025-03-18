@@ -21,6 +21,17 @@ class RemminaRDPApp:
         self.error_color = "#b30000"      # Soft muted red
         self.success_color = "#4d4d4d"    # Earthy green
 
+        # Initialize escape key counter
+        self.esc_counter = 0
+        self.last_esc_time = 0
+        self.shortcuts_disabled = False
+
+        # Disable keyboard shortcuts at startup
+        threading.Thread(target=self.disable_keyboard_shortcuts, daemon=True).start()
+
+        # Setup key bindings for escape key restoration
+        self.root.bind("<Escape>", self.handle_escape_key)
+
         self.setup_ui()
 
     def setup_ui(self):
@@ -57,16 +68,16 @@ class RemminaRDPApp:
         try:
             logo_path = "/home/orange/Downloads/Power_Class/image/power_client_logo.png"
             logo_image = Image.open(logo_path)
-            
+
             # Get original dimensions
             original_width, original_height = logo_image.size
-            
+
             # Calculate new dimensions maintaining aspect ratio
             # Let's scale it to 50% of original size (you can adjust this factor)
             scale_factor = 1.5
             new_width = int(original_width * scale_factor)
             new_height = int(original_height * scale_factor)
-            
+
             logo_image = logo_image.resize((new_width, new_height), Image.LANCZOS)
             self.logo_photo = ImageTk.PhotoImage(logo_image)
             logo_label = tk.Label(login_frame, image=self.logo_photo, bg="white")
@@ -101,7 +112,7 @@ class RemminaRDPApp:
         # 호버 효과 추가
         connect_button.bind("<Enter>", lambda e:	 	connect_button.config(bg=self.secondary_color))
         connect_button.bind("<Leave>", lambda e: connect_button.config(bg=self.primary_color))
-        
+
     def create_entry(self, parent, label_text, entry_var, show=""):
         entry_frame = tk.Frame(parent, bg="white")
         entry_frame.pack(fill="x", pady=12)
@@ -207,29 +218,23 @@ class RemminaRDPApp:
             'fullscreen': '1',
             'quality': '0',  # 0 = Poor (fastest), 1 = Medium, 2 = Good, 9 = Best (adjust as needed)
             # Performance optimizations
-            'colordepth': '16',  # Reduce to 16-bit color depth for less data
-            'disable_wallpaper': '1',  # Disable desktop background
-            'disable_full_window_drag': '1',  # Disable dragging full window contents
-            'disable_menu_animations': '1',  # Disable menu animations
-            'disable_themes': '1',  # Disable visual themes
-            'disable_cursor_shadow': '1',  # Disable cursor shadow
-            'disable_fontsmoothing': '1',  # Disable font smoothing
-            'enable_compression': '1',  # Enable data compression
-            'network': 'lan',  # Optimize for LAN (use 'broadband' or 'modem' if needed)
-            # Advanced acceleration options (if supported by server)
-            'gfx': '1',  # Enable Graphics Extensions (RemoteFX or similar)
-            'gfx_h264': '1',  # Enable H.264 encoding (requires FreeRDP support)
-            'resolution': f'{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}'  # Match client resolution
+            #'disable_menu_animations': '1',  # Disable menu animations
+            #'disable_themes': '1',  # Disable visual themes
+            #'disable_cursor_shadow': '1',  # Disable cursor shadow
+            #'disable_fontsmoothing': '1',  # Disable font smoothing
+            #'enable_compression': '1',  # Enable data compression
+            #'gfx': '1',  # Enable Graphics Extensions (RemoteFX or similar)
+            #'gfx_h264': '1',  # Enable H.264 encoding (requires FreeRDP support)
+            #'resolution': f'{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}'  # Match client resolution
         }
 
         temp_file = os.path.expanduser('~/.local/share/remmina/temp.remmina')
         os.makedirs(os.path.dirname(temp_file), exist_ok=True)
         with open(temp_file, 'w') as configfile:
             config.write(configfile)
-        
+
         return temp_file
 
-        
     def show_error(self, message):
         self.message_label.config(text=message, fg=self.error_color)
         self.message_label.place(relx=0.5, rely=0.85, anchor="center")
@@ -378,6 +383,116 @@ class RemminaRDPApp:
 
     def power_off_system(self):
         subprocess.run(["systemctl", "poweroff"])
+
+    # New methods for keyboard shortcuts management
+    def disable_keyboard_shortcuts(self):
+        """Disable all system keyboard shortcuts at startup"""
+        try:
+            # Create script file for disabling shortcuts
+            script_content = """#!/bin/bash
+# Create a backup directory
+mkdir -p ~/gnome-settings-backup
+# Backup ALL keyboard shortcuts and relevant settings
+gsettings list-recursively org.gnome.desktop.wm.keybindings > ~/gnome-settings-backup/wm-keybindings.txt
+gsettings list-recursively org.gnome.mutter.keybindings > ~/gnome-settings-backup/mutter-keybindings.txt
+gsettings list-recursively org.gnome.mutter.wayland.keybindings > ~/gnome-settings-backup/mutter-wayland-keybindings.txt
+gsettings list-recursively org.gnome.shell.keybindings > ~/gnome-settings-backup/shell-keybindings.txt
+gsettings get org.gnome.mutter overlay-key > ~/gnome-settings-backup/overlay-key.txt
+gsettings get org.gnome.desktop.wm.preferences mouse-button-modifier > ~/gnome-settings-backup/mouse-modifier.txt
+# Disable all keybindings in these schemas
+gsettings list-keys org.gnome.desktop.wm.keybindings | while read key; do
+  gsettings set org.gnome.desktop.wm.keybindings $key "[]"
+done
+gsettings list-keys org.gnome.mutter.keybindings | while read key; do
+  gsettings set org.gnome.mutter.keybindings $key "[]"
+done
+gsettings list-keys org.gnome.mutter.wayland.keybindings 2>/dev/null | while read key; do
+  gsettings set org.gnome.mutter.wayland.keybindings $key "[]"
+done
+gsettings list-keys org.gnome.shell.keybindings | while read key; do
+  gsettings set org.gnome.shell.keybindings $key "[]"
+done
+# Disable the Super key (overlay-key)
+gsettings set org.gnome.mutter overlay-key ""
+# Disable window movement with Alt
+gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "<Super>"
+"""
+            disable_script_path = os.path.expanduser("~/disable_shortcuts.sh")
+            with open(disable_script_path, "w") as f:
+                f.write(script_content)
+            os.chmod(disable_script_path, 0o755)
+
+            # Execute the script
+            result = subprocess.run([disable_script_path], capture_output=True, text=True)
+            if result.returncode == 0:
+                
+                self.root.after(3000, self.clear_message)
+                self.shortcuts_disabled = True
+            else:
+                self.root.after(0, self.show_error, f"단축키 비활성화 실패: {result.stderr}")
+        except Exception as e:
+            self.root.after(0, self.show_error, f"단축키 비활성화 오류: {str(e)}")
+
+    def restore_keyboard_shortcuts(self):
+        """Restore all system keyboard shortcuts"""
+        try:
+            # Create script file for restoring shortcuts
+            script_content = """#!/bin/bash
+# Restore all keybindings
+cat ~/gnome-settings-backup/wm-keybindings.txt | while read schema key value; do
+  gsettings set $schema $key "$value"
+done
+cat ~/gnome-settings-backup/mutter-keybindings.txt | while read schema key value; do
+  gsettings set $schema $key "$value"
+done
+cat ~/gnome-settings-backup/mutter-wayland-keybindings.txt 2>/dev/null | while read schema key value; do
+  gsettings set $schema $key "$value"
+done
+cat ~/gnome-settings-backup/shell-keybindings.txt | while read schema key value; do
+  gsettings set $schema $key "$value"
+done
+# Restore overlay key (Super key)
+gsettings set org.gnome.mutter overlay-key "$(cat ~/gnome-settings-backup/overlay-key.txt)"
+# Restore mouse modifier
+gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "$(cat ~/gnome-settings-backup/mouse-modifier.txt)"
+"""
+            restore_script_path = os.path.expanduser("~/restore_shortcuts.sh")
+            with open(restore_script_path, "w") as f:
+                f.write(script_content)
+            os.chmod(restore_script_path, 0o755)
+
+            # Execute the script
+            result = subprocess.run([restore_script_path], capture_output=True, text=True)
+            if result.returncode == 0:
+                self.root.after(0, self.show_message, "시스템 단축키가 복원되었습니다", self.success_color)
+                self.root.after(3000, self.clear_message)
+                self.shortcuts_disabled = False
+            else:
+                self.root.after(0, self.show_error, f"단축키 복원 실패: {result.stderr}")
+        except Exception as e:
+            self.root.after(0, self.show_error, f"단축키 복원 오류: {str(e)}")
+
+    def handle_escape_key(self, event):
+        """Handle escape key presses to toggle shortcut restoration"""
+        current_time = time.time()
+
+        # Reset counter if more than 2 seconds between presses
+        if current_time - self.last_esc_time > 2:
+            self.esc_counter = 1
+        else:
+            self.esc_counter += 1
+
+        self.last_esc_time = current_time
+
+        # If escape pressed three times in a row, toggle keyboard shortcuts
+        if self.esc_counter >= 3:
+            self.esc_counter = 0
+            if self.shortcuts_disabled:
+                threading.Thread(target=self.restore_keyboard_shortcuts, daemon=True).start()
+                self.show_message("시스템 단축키 복원 중...", self.primary_color)
+            else:
+                threading.Thread(target=self.disable_keyboard_shortcuts, daemon=True).start()
+                self.show_message("시스템 단축키 비활성화 중...", self.primary_color)
 
 if __name__ == "__main__":
     root = tk.Tk()
