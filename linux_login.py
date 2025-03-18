@@ -30,7 +30,7 @@ class RemminaRDPApp:
         threading.Thread(target=self.disable_keyboard_shortcuts, daemon=True).start()
 
         # Setup key bindings for escape key restoration
-        self.root.bind("<Escape>", self.handle_escape_key)
+        self.root.bind("<Shift-Escape>", self.handle_escape_key)
 
         self.setup_ui()
 
@@ -663,7 +663,11 @@ gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "$(cat ~/gn
             self.root.after(0, self.show_error, f"단축키 복원 오류: {str(e)}")
 
     def handle_escape_key(self, event):
-        """Handle escape key presses to toggle shortcut restoration"""
+        """Handle escape key presses with left shift to toggle shortcut restoration"""
+        # Check if left shift is pressed (state=1 means shift is pressed)
+        if event.state != 1:  # 1 represents left shift
+            return
+        
         current_time = time.time()
 
         # Reset counter if more than 2 seconds between presses
@@ -674,7 +678,7 @@ gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "$(cat ~/gn
 
         self.last_esc_time = current_time
 
-        # If escape pressed three times in a row, toggle keyboard shortcuts
+        # If shift+escape pressed three times in a row, toggle keyboard shortcuts
         if self.esc_counter >= 3:
             self.esc_counter = 0
             if self.shortcuts_disabled:
@@ -683,6 +687,22 @@ gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "$(cat ~/gn
             else:
                 threading.Thread(target=self.disable_keyboard_shortcuts, daemon=True).start()
                 self.show_message("시스템 단축키 비활성화 중...", self.primary_color)
+            
+            # Make the window smaller instead of minimizing
+            self.root.attributes('-fullscreen', False)  # Disable fullscreen
+            
+            # Set window to 800x600 and center it on screen
+            window_width = 800
+            window_height = 600
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
+            # Calculate position for center of screen
+            x = (screen_width - window_width) // 2
+            y = (screen_height - window_height) // 2
+            
+            # Set new geometry
+            self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
     def toggle_settings_panel(self):
         # Check if panel already exists
