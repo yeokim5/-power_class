@@ -663,7 +663,6 @@ gsettings set org.gnome.desktop.wm.preferences mouse-button-modifier "$(cat ~/gn
             self.root.after(0, self.show_error, f"단축키 복원 오류: {str(e)}")
 
     def handle_escape_key(self, event):
-        """Handle escape key presses with left shift to toggle shortcut restoration"""
         # Check if left shift is pressed (state=1 means shift is pressed)
         if event.state != 1:  # 1 represents left shift
             return
