@@ -7,10 +7,15 @@ import time
 import configparser
 import threading
 import socket
+import logging
+
+# Setup logging
+logging.basicConfig(filename='/tmp/rdp_app.log', level=logging.DEBUG)
 
 class RemminaRDPApp:
     def __init__(self, root):
         self.root = root
+        time.sleep(3)
         self.root.title("PowerClient RDP")
         self.root.configure(bg="#f0f0f0")  # Warm light beige background
 
