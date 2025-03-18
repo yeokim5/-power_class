@@ -180,7 +180,7 @@ class RemminaRDPApp:
                                           image=self.eye_closed_icon,
                                           command=lambda: self.toggle_password_visibility(entry),
                                           bg="#f8f9fa",
-                                          activebackground="#f0f0f0",  # Subtle hover effect
+                                          activebackground="#f8f9fa",  # Match background color to prevent visible click effect
                                           bd=0,
                                           relief=tk.FLAT,
                                           cursor="hand2",
@@ -499,8 +499,8 @@ class RemminaRDPApp:
         confirm_window.title(f"{action_type} 확인")
         confirm_window.configure(bg="white")
         
-        # Set size and position
-        width, height = 360, 220  # Slightly larger
+        # Set size and position - reduced height
+        width, height = 360, 115  # Reduced height from 220 to 180
         x = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
         confirm_window.geometry(f"{width}x{height}+{x}+{y}")
@@ -508,7 +508,7 @@ class RemminaRDPApp:
         # Make the window border look nicer
         confirm_window.config(highlightbackground="#e0e0e0", highlightthickness=1)
         
-        # Try to load appropriate icon
+        # Try to load appropriate icon with reduced vertical padding
         icon_label = tk.Label(confirm_window, bg="white")
         try:
             # Try loading a warning icon
@@ -518,24 +518,24 @@ class RemminaRDPApp:
                 icon = icon.resize((48, 48), Image.LANCZOS)
                 self.warning_icon = ImageTk.PhotoImage(icon)
                 icon_label.config(image=self.warning_icon)
-                icon_label.pack(pady=(25, 15))
+                icon_label.pack(pady=(15, 10))  # Reduced padding
         except Exception as e:
             print(f"Warning icon loading error: {e}")
         
-        # Add message with improved styling
+        # Add message with improved styling and reduced padding
         tk.Label(confirm_window,
                text=message,
                bg="white",
                fg=self.text_color,
-               font=("Segoe UI", 12, "bold")).pack(pady=(5, 20))
+               font=("Segoe UI", 12, "bold")).pack(pady=(5, 15))  # Reduced bottom padding
         
-        # Buttons frame with better spacing
+        # Buttons frame with adjusted spacing
         buttons_frame = tk.Frame(confirm_window, bg="white")
-        buttons_frame.pack(fill="x", padx=40, pady=(0, 25))
+        buttons_frame.pack(fill="x", padx=40, pady=(0, 15))  # Reduced bottom padding
         
         # No button (cancel) - put first for safety
         no_btn = tk.Button(buttons_frame,
-                         text="아니오, 취소합니다",
+                         text="취소",
                          command=confirm_window.destroy,
                          bg="#f0f0f0",
                          fg=self.text_color,
@@ -550,7 +550,7 @@ class RemminaRDPApp:
         
         # Yes button (confirm action)
         yes_btn = tk.Button(buttons_frame,
-                          text=f"예, {action_type}합니다",
+                          text=f"{action_type}",
                           command=lambda: [confirm_window.destroy(), action_command()],
                           bg=self.primary_color,
                           fg="white",
